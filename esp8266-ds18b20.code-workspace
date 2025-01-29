@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"name": "Blink_LED",
+			"path": "../../PlatformIO/Projects/Blink_LED"
+		},
+		{
+			"name": "TestWiFi",
+			"path": "../TestWiFi"
+		}
+	],
+	"settings": {}
+}
