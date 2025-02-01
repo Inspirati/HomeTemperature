@@ -1,9 +1,7 @@
 #include <Arduino.h>
-//#include <AsyncMQTT_ESP32.h>
 #include <AsyncMqttClient.h>
 #include <ESP8266WiFi.h>
 #include <NTPClient.h>
-//#include <WiFi.h>
 #include <WiFiUdp.h>
 #include <Ticker.h>
 #include "config.h"

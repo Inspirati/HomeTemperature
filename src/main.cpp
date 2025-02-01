@@ -2,10 +2,6 @@
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
 #include <AsyncMqttClient.h>
-//#include <WiFi.h>
-//#include <AsyncMQTT_ESP32.h>
-//#include <NTPClient.h>
-//#include <WiFiUdp.h>
 #include "ds18b20.h"
 #include "config.h"
 #include "network.h"

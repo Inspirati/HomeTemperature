@@ -10,7 +10,6 @@
 #include "utils.h"
 
 #include <ESP8266WiFi.h> // temporary for WiFi
-//#include <WiFi.h> // temporary for WiFi
 
 extern bool verbose;
 extern AsyncMqttClient mqttClient;
