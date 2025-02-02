@@ -1,9 +1,8 @@
-#include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
-#include "config.h"
-#include "utils.h"
+#include "../include/config.h"
+#include "../include/utils.h"
 
 extern bool verbose;
 
@@ -78,4 +77,28 @@ void connectToTime(void) {  // Initialize a NTPClient to get time
   // GMT -1 = -3600
   // GMT 0 = 0
   timeClient.setTimeOffset(0);
+}
+
+
+static bool profiling_enabled = false;
+static unsigned long startMillis;
+
+void profiling_enable(bool state) {
+  profiling_enabled = state;
+}
+
+void profiling_begin(void) {
+  if (profiling_enabled) {
+    startMillis = millis();
+  }
+}
+
+void profiling_print(const char* msg) {
+  if (profiling_enabled) {
+    unsigned long endMillis = millis();
+    Serial.print(msg);
+    Serial.print(endMillis - startMillis);
+    Serial.println(" ms");
+    startMillis = millis();
+  }
 }

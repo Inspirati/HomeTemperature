@@ -1,11 +1,20 @@
-#include <Arduino.h>
 #include <ArduinoJson.h>
 #include <ESP8266WiFi.h>
 #include <AsyncMqttClient.h>
-#include "ds18b20.h"
-#include "config.h"
-#include "network.h"
-#include "utils.h"
+#include "../include/ds18b20.h"
+#include "../include/config.h"
+#include "../include/network.h"
+#include "../include/utils.h"
+
+#define _USE_DHT_
+
+#ifdef _USE_DHT_
+#include "DHTesp.h" // Click here to get the library: http://librarymanager/All#DHTesp
+DHTesp dht;
+#endif // _USE_DHT_
+
+void dht_setup(void);
+void dht_loop(void);
 
 unsigned long previousMillis = 0;  // Stores last time temperature was published
 const long interval = 10000;       // Interval at which to publish sensor readings
@@ -29,6 +38,7 @@ void enumerate(void) {
   doc["sensor"] = "gps";
   doc["time"] = 1351824120;
   JsonArray data = doc["data"].to<JsonArray>();
+  (void)data;
   doc["data"][0] = 48.756080;
   doc["data"][1] = 2.302038;
   serializeJson(doc, Serial);
@@ -76,7 +86,9 @@ void menu(void) {
   Serial.println(F("  d. show user data"));
   Serial.println(F("  s. save user data"));
   Serial.println(F("  t. call STP"));
+  Serial.println(F("  u. unix time"));
   Serial.println(F("  p. print time"));
+  Serial.println(F("  h. humidity"));
   Serial.println(F("  m. menu (this)"));
   Serial.println(F("  v. toogle verbose mode"));
   Serial.print(F("Your choice> "));
@@ -97,9 +109,10 @@ void console(void) {
     if (select == 'l') return ds18b20_load();
     if (select == 'd') return ds18b20_show();
     if (select == 's') return ds18b20_save();
-//    if (select == 'u') return _get_unix_time();
+    if (select == 'u') { _get_unix_time(); return; }
     if (select == 'p') { _print_time(); return; }
     if (select == 't') return get_time();
+    if (select == 'h') return dht_loop();
     if (select == '?') return menu();
     if (select == 'v') { verbose = !verbose; if (verbose) Serial.println("verbose"); else Serial.println("silent"); }
   }
@@ -115,6 +128,7 @@ void setup() {
   connectToWifi();
   ds18b20_init();
   Serial.println("type '?' for help (menu)");
+  //dht_setup();
 }
 
 void loop() {
@@ -131,3 +145,44 @@ void loop() {
 //#include <functional>
 //typedef std::function<void(char* topic, float temp)> _OnSensorData;  // user callbacks
 //void OnSensorData(char* topic, float temp) {}
+
+void dht_setup(void) {
+#ifdef _USE_DHT_
+  Serial.println("Status\tHumidity (%)\tTemperature (C)\t(F)\tHeatIndex (C)\t(F)");
+  String thisBoard = ARDUINO_BOARD;
+  Serial.println(thisBoard);
+
+  // Autodetect is not working reliable, don't use the following line
+  // dht.setup(17);
+  // use this instead: 
+//  dht.setup(17, DHTesp::DHT22); // Connect DHT sensor to GPIO 17
+  dht.setup(0, DHTesp::DHT22); // Connect DHT sensor to GPIO 0 (FLASH)
+#endif // _USE_DHT_
+}
+
+void dht_loop(void) {
+#ifdef _USE_DHT_
+  static bool isSetup = false;
+  if (!isSetup) {
+    dht_setup();
+    isSetup = true;
+  }
+  delay(dht.getMinimumSamplingPeriod());
+
+  float humidity = dht.getHumidity();
+  float temperature = dht.getTemperature();
+
+  Serial.print(dht.getStatusString());
+  Serial.print("\t");
+  Serial.print(humidity, 1);
+  Serial.print("\t\t");
+  Serial.print(temperature, 1);
+  Serial.print("\t\t");
+  Serial.print(dht.toFahrenheit(temperature), 1);
+  Serial.print("\t\t");
+  Serial.print(dht.computeHeatIndex(temperature, humidity, false), 1);
+  Serial.print("\t\t");
+  Serial.println(dht.computeHeatIndex(dht.toFahrenheit(temperature), humidity, true), 1);
+#endif // _USE_DHT_
+}
+

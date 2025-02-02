@@ -15,3 +15,6 @@ String get_macAddress(void);
 void wifi_init(void);
 void mqtt_init(void);
 
+void profiling_enable(bool state = true);
+void profiling_begin(void);
+void profiling_print(const char* msg);
