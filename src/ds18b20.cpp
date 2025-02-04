@@ -1,13 +1,12 @@
-#include <Arduino.h>
 #include <math.h>
 #include <OneWire.h>
 #include <ArduinoJson.h>
 #include <AsyncMqttClient.h>
 #include <DallasTemperature.h>
-#include "config.h"
-#include "ds18b20.h"
-#include "network.h"
-#include "utils.h"
+#include "../include/config.h"
+#include "../include/ds18b20.h"
+#include "../include/network.h"
+#include "../include/utils.h"
 
 #include <ESP8266WiFi.h> // temporary for WiFi
 
@@ -29,11 +28,15 @@ enum stat_types { MIN_TEMP, MAX_TEMP, DELTA, AVG_TEMP, STD_DEV, MAX_STAT };
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 DeviceAddress sensorAddresses[MAX_SENSORS]; // Array to store sensor addresses
-float offsets[MAX_SENSORS];
-float results[MAX_SENSORS]; 
-float std_devs[MAX_SENSORS]; 
-float std_dev; 
+float raw_tmps[MAX_SENSORS];  // raw sensor results averaged across oversampled readings
+float adj_tmps[MAX_SENSORS];  // adjusted results by applying calibration offset to raw
+float std_devs[MAX_SENSORS];  // the standard deviation of each sensors results from oversampled readings
+float off_sets[MAX_SENSORS];
+//float results[MAX_SENSORS]; 
+float avg_tmp; // across all sensors - for calibration, calculation of offset data
+float std_dev; // between all sensors - for calibration across the array
 int sensorCount;
+bool calMode = true;
 
 static float findMin(float readings[], int count) {
   float min = readings[0];
@@ -106,7 +109,7 @@ static void printSensorAddress(DeviceAddress sensorAddress) {
   }
 }
 
-static void formatSensorAddress(DeviceAddress sensorAddress, char * dest, int size) {
+static inline void formatSensorAddress(DeviceAddress sensorAddress, char * dest, int size) {
   if (size > 15) {
     for (int i = 0; i < 8; i++) {
       snprintf(&dest[i*2], size, "%02X", sensorAddress[i]);
@@ -115,7 +118,7 @@ static void formatSensorAddress(DeviceAddress sensorAddress, char * dest, int si
   }
 }
 
-static void format1WireAddress(DeviceAddress sensorAddress, char * dest, int size) {
+static inline void format1WireAddress(DeviceAddress sensorAddress, char * dest, int size) {
   if (size > 14) {
     sprintf(dest, "%02X-", sensorAddress[0]);
     for (int i = 1; i < 7; i++) {
@@ -124,13 +127,11 @@ static void format1WireAddress(DeviceAddress sensorAddress, char * dest, int siz
   }
 }
 
-static float sample_sensors(bool init_offsets) {  // Collect temperature readings multiple times for each sensor
+static float sample_sensors(bool init_off_sets) {  // Collect temperature readings multiple times for each sensor
   float sensorReadings[NUM_SAMPLES][MAX_SENSORS];  // 2D array for storing readings (rows = readings, columns = sensors)
   float stats[MAX_STAT];
-  unsigned long startMillis;
-  unsigned long endMillis;
 
-  startMillis = millis();
+  profiling_begin();
   // Oversample every sensor which was detected during setup
   for (int i = 0; i < NUM_SAMPLES; i++) {
     sensors.requestTemperatures();
@@ -139,15 +140,7 @@ static float sample_sensors(bool init_offsets) {  // Collect temperature reading
     }
     yield();
   }
-  endMillis = millis();
-  if (verbose) {
-    Serial.print("Conversation time: ");
-    Serial.print((endMillis - startMillis));
-    Serial.print(" = time per sensor: ");
-    Serial.println((endMillis - startMillis) / NUM_SAMPLES);
-  }
-
-  startMillis = millis();
+  profiling_print("ds18b20 sampling time: ");
   // Calculate and print statistics for each sensor (column in 2D array)
   for (int j = 0; j < sensorCount; j++) {
     float sensorData[NUM_SAMPLES];
@@ -158,36 +151,32 @@ static float sample_sensors(bool init_offsets) {  // Collect temperature reading
     // Calculate min, max, delta, avg, and std dev for this sensor (column)
     calc_stats(stats, sensorData, NUM_SAMPLES, '0' + j);
     std_devs[j] = stats[STD_DEV];
-    if (init_offsets) {
-      results[j] = stats[AVG_TEMP];
-    } else {
-      results[j] = stats[AVG_TEMP] - offsets[j];
-    }
+    raw_tmps[j] = stats[AVG_TEMP];
+    adj_tmps[j] = stats[AVG_TEMP] - off_sets[j];
+//    if (init_off_sets) {
+//      results[j] = stats[AVG_TEMP];
+//    } else {
+//      results[j] = stats[AVG_TEMP] - off_sets[j];
+//    }
   }
-  endMillis = millis();
-  if (verbose) {
-    Serial.print("Sensors stats calc time: ");
-    Serial.println((endMillis - startMillis));
-  }
-  startMillis = millis();
+  profiling_print("Sensors stat calc time: ");
   // Calculate the resulting statistics across all the sensor averages 
-  calc_stats(stats, results, sensorCount, '*');
+//  calc_stats(stats, results, sensorCount, '*');
+  calc_stats(stats, raw_tmps, sensorCount, '*');
   std_dev = stats[STD_DEV];
-  endMillis = millis();
-  if (init_offsets) {
+  avg_tmp = stats[AVG_TEMP];
+  if (init_off_sets) {
     for (int i = 0; i < sensorCount; i++) {
-      offsets[i] = results[i] - stats[AVG_TEMP];
+//      off_sets[i] = results[i] - stats[AVG_TEMP];
+      off_sets[i] = raw_tmps[i] - stats[AVG_TEMP];
     }
     if (verbose) {
-      Serial.print("offsets: ");
-      print_array(offsets, sensorCount);
+      Serial.print("off_sets: ");
+      print_array(off_sets, sensorCount);
       Serial.println();
     }
   }
-  if (verbose) {
-    Serial.print("Totals stat calc time: ");
-    Serial.println((endMillis - startMillis));
-  }
+  profiling_print("Totals stat calc time: ");
   return stats[AVG_TEMP];
 }
 
@@ -195,7 +184,7 @@ void ds18b20_show(void) {
   for (uint8_t i = 0; i < sensorCount; i++) {
     printSensorAddress(sensorAddresses[i]);
     Serial.print(": ");
-    Serial.print(offsets[i]);
+    Serial.print(off_sets[i]);
     Serial.println();
   }
 }
@@ -203,18 +192,18 @@ void ds18b20_show(void) {
 void ds18b20_load(void) { // the sensors default userdata value was 21760 = 170 degrees C
   for (uint8_t i = 0; i < sensorCount; i++) {
     int16_t data = sensors.getUserData(sensorAddresses[i]);
-    offsets[i] = sensors.rawToCelsius(data);
+    off_sets[i] = sensors.rawToCelsius(data);
   }
   ds18b20_show();
 }
 
 void ds18b20_save(void) {
   for (uint8_t i = 0; i < sensorCount; i++) {
-    int16_t data = sensors.celsiusToRaw(offsets[i]);
+    int16_t data = sensors.celsiusToRaw(off_sets[i]);
     sensors.setUserData(sensorAddresses[i], data);
     printSensorAddress(sensorAddresses[i]);
     Serial.print(": ");
-    Serial.print(offsets[i]);
+    Serial.print(off_sets[i]);
     Serial.print(" -> ");
     Serial.print(data);
     Serial.println();
@@ -238,30 +227,28 @@ void ds18b20_publish(void) {
   String json;
   char dest[17];
   if (sensorCount > 0) {
-
     float avg = sample_sensors(false);
-
-  //  snprintf(mqtt_pub_str, MQTT_PUB_BUFSIZ, MQTT_PUB_TEMP, WiFi.localIP().toString().c_str());
-  //  packetIdPub1 = mqttClient.publish(mqtt_pub_str, 1, true, String(avg).c_str());
-  //  if (verbose) {
-  //    Serial.printf("Published on topic %s at QoS 1, packetId: %i ", mqtt_pub_str, packetIdPub1);
-  //    Serial.printf("Message: %.2f \r\n", avg);
-  //  }
-    doc["type"] = "esp8266";
-    doc["addr"] = get_macAddress();
-    doc["time"] = _get_unix_time();
-    doc["size"] = sensorCount;
-    doc["vari"] = std_dev;
-    JsonArray sensors = doc["sens"].to<JsonArray>();
+    (void)avg;
+    doc["dev"] = "esp8266";
+    doc["mac"] = get_macAddress();
+//    doc["ip4"] = WiFi.localIP().toString().c_str();
+    doc["sec"] = _get_unix_time();
+    doc["cnt"] = sensorCount;
+    if (calMode) {
+      doc["val"] = avg_tmp;
+      doc["var"] = std_dev;
+    }
+    JsonArray sensors = doc["data"].to<JsonArray>();
     for (uint8_t i = 0; i < sensorCount; i++) {
       JsonObject sensors_0 = sensors.add<JsonObject>();
       //formatSensorAddress(sensorAddresses[i], dest, sizeof(dest));
       format1WireAddress(sensorAddresses[i], dest, sizeof(dest));
-      sensors_0["type"] = "ds18b20";
-      sensors_0["addr"] = dest;
-      sensors_0["data"] = results[i];
-      sensors_0["offs"] = offsets[i];
-      sensors_0["vari"] = std_devs[i];
+      sensors_0["dev"] = "ds18b20";
+      sensors_0["adr"] = dest;
+      sensors_0["raw"] = raw_tmps[i];
+      sensors_0["adj"] = adj_tmps[i];
+      sensors_0["ofs"] = off_sets[i];
+      sensors_0["var"] = std_devs[i];
     }
     doc.shrinkToFit();  // optional
     if (verbose) {
@@ -273,7 +260,7 @@ void ds18b20_publish(void) {
   //  mqttClient.publish(MQTT_PUB_JSON, 1, true, json.c_str());
     snprintf(mqtt_pub_str, MQTT_PUB_BUFSIZ, MQTT_PUB_JSON, WiFi.localIP().toString().c_str());
     packetIdPub1 = mqttClient.publish(mqtt_pub_str, 1, true, json.c_str());
-
+    (void)packetIdPub1;
   // stats[AVG_TEMP]
   }
 }
@@ -305,3 +292,4 @@ void ds18b20_init(void) {
     Serial.println("No sensors found!");
   }
 }
+

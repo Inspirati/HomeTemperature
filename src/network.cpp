@@ -1,12 +1,11 @@
-#include <Arduino.h>
 #include <AsyncMqttClient.h>
 #include <ESP8266WiFi.h>
 #include <NTPClient.h>
 #include <WiFiUdp.h>
 #include <Ticker.h>
-#include "config.h"
-#include "network.h"
-#include "utils.h"
+#include "../include/config.h"
+#include "../include/network.h"
+#include "../include/utils.h"
 
 extern bool verbose;
 
@@ -155,3 +154,4 @@ void mqtt_init(void) {
 }
 
 String get_macAddress(void) { return WiFi.macAddress(); }
+
